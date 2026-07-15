@@ -14,13 +14,13 @@ import math
 # ======================================================================
 
 # Player.kick() 会把力度夹到这个范围内。如果超过范围，因为控制接口不支持，可能会摔倒。
-KICK_POWER_MIN = 2.0
-KICK_POWER_MAX = 10.0
+KICK_POWER_MIN = 1.0
+KICK_POWER_MAX = 5.0
 
 # 普通比赛踢球力度。
-KICK_POWER_DEFAULT = 4.0
-KICK_POWER_BACKFIELD = 7.0
-KICK_POWER_OUR_KICKOFF = 4.0
+KICK_POWER_DEFAULT = 5.0
+KICK_POWER_BACKFIELD = 5.0
+KICK_POWER_OUR_KICKOFF = 5.0
 
 
 # ======================================================================
