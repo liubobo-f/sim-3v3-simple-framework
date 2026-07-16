@@ -53,7 +53,7 @@ def game_control_state_from_dict(payload: Mapping[str, object]) -> GameControlSt
         stopped=_json_bool(payload, "stopped", False),
         game_phase=GamePhase(_json_str(payload, "gamePhase", GamePhase.NORMAL.value)),
         state=GameState(_json_str(payload, "state", GameState.INITIAL.value)),
-        set_play=SetType(_json_str(payload, "setPlay", SetType.NONE.value)),
+        set_type=SetType(_json_str(payload, "setPlay", SetType.NONE.value)),
         first_half=_json_bool(payload, "firstHalf", True),
         kicking_team=_json_int(payload, "kickingTeam", KICKING_TEAM_NONE),
         secs_remaining=_json_int(payload, "secsRemaining", 0),

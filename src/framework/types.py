@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from types import SimpleNamespace
 
 
 __all__ = [
@@ -29,6 +28,7 @@ __all__ = [
     "Pose2D",
     "RobotState",
     "SetType",
+    "StrategyState",
     "TeamState",
     "WorldSnapshot",
 ]
@@ -194,6 +194,21 @@ ADULT_FIELD_DIMENSIONS = FieldDimensions(
 
 
 # ----------------------------------------------------------------------
+# 策略状态(跨帧可修改,存储在 Context 中)
+# ----------------------------------------------------------------------
+
+
+@dataclass
+class StrategyState:
+    """策略跨帧状态。可在 play() 中修改,实现粘性选择等。
+
+    该类是 Context 中唯一的可变部分,存储需要跨帧保持的策略状态。
+    """
+
+    normal_attacker_id: int | None = None
+
+
+# ----------------------------------------------------------------------
 # 观察类型(球 / 机器人 / 裁判机)
 # ----------------------------------------------------------------------
 
@@ -238,7 +253,7 @@ class TeamState:
 
 @dataclass(frozen=True)
 class GameControlState:
-    """裁判机状态快照。包含比赛控制信息和策略跨帧状态。"""
+    """裁判机状态快照。包含比赛控制信息。"""
 
     packet_number: int = 0
     players_per_team: int = 0
@@ -246,7 +261,7 @@ class GameControlState:
     stopped: bool = False
     game_phase: GamePhase = GamePhase.NORMAL
     state: GameState = GameState.INITIAL
-    set_play: SetType = SetType.NONE
+    set_type: SetType = SetType.NONE
     first_half: bool = True
     kicking_team: int = KICKING_TEAM_NONE
     secs_remaining: int = 0
@@ -255,8 +270,7 @@ class GameControlState:
         default_factory=lambda: (TeamState(team_number=1), TeamState(team_number=2))
     )
     last_seen_at: float = 0.0
-    phase: "Phase | None" = None
-    strategy_state: SimpleNamespace = field(default_factory=SimpleNamespace)
+    phase: Phase = Phase.STOPPED
 
     def get_team_state(self, team_id: int) -> TeamState | None:
         """根据队伍编号获取队伍状态。"""
@@ -278,7 +292,7 @@ class GameControlState:
             return Phase.READY
 
         if self.state == GameState.PLAYING and not self.stopped:
-            if self.set_play != SetType.NONE and self.kicking_team != KICKING_TEAM_NONE:
+            if self.set_type != SetType.NONE and self.kicking_team != KICKING_TEAM_NONE:
                 if self.kicking_team == team_id:
                     return Phase.OUR_SET_PLAY
                 else:
@@ -306,20 +320,26 @@ class Context:
 
     详细字段语义见 docs/new_design.md 第 9 节。
 
-    比赛阶段(phase)和策略跨帧状态(strategy_state)通过 game 字段访问:
-    - context.game.phase: 当前比赛阶段(NORMAL/OFF_KICK等)
-    - context.game.strategy_state: 策略跨帧状态容器
+    访问方式:
+    - context.game: 裁判机状态(包含 phase 等)
+    - context.strategy: 策略跨帧状态(可修改,实现粘性选择等)
+    - context.prev_phase: 上一帧的比赛阶段(用于检测阶段变化)
+
+    设计约束:
+    - context.strategy 是可变的,且被多帧共享引用
+    - 如需保存策略状态快照,请在修改前手动复制
     """
 
     now: float
     dt: float
     team_id: int
     field: FieldDimensions
-    game: GameControlState | None = None
+    prev_phase: "Phase | None" = None
+    game: GameControlState = field(default_factory=GameControlState)
     ball: BallState | None = None
     teammates: dict[int, RobotState] = field(default_factory=dict)
     opponents: dict[int, RobotState] = field(default_factory=dict)
-    pre_context: "Context | None" = None
+    strategy: StrategyState = field(default_factory=StrategyState)
 
 
 @dataclass(frozen=True)

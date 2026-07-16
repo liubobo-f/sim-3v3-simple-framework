@@ -10,7 +10,6 @@ import dataclasses
 import logging
 import threading
 import time
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Protocol
 
 from .config import SoccerConfig
@@ -20,6 +19,7 @@ from .types import (
     Context,
     GameControlState,
     RobotState,
+    StrategyState,
     WorldSnapshot,
 )
 
@@ -71,7 +71,7 @@ class SoccerRuntime:
         self._last_now: float | None = None
         self._tick_id = 0
         self._prev_context: Context | None = None
-        self._state = SimpleNamespace(normal_attacker=None, kickoff_taker=None)
+        self._strategy = StrategyState()
 
     # ------------------------------------------------------------------
     # 生命周期
@@ -161,11 +161,12 @@ class SoccerRuntime:
             self._log_heartbeat(ctx, dt)
 
     def _draw_world(self, ctx: Context) -> None:
-        """常驻可视化:球场/球门(暗)、球(橙)、我方(红+编号+朝向)、对手(蓝+朝向)。"""
+        """常驻可视化:球场/球门(暗)、球(橙)、我方(红+编号+朝向)、对手(蓝+朝向)、比赛状态。"""
         from . import debugdraw
         import math
 
         self._draw_field(ctx)
+        self._draw_game_state(ctx)
 
         if ctx.ball is not None:
             debugdraw.point(
@@ -181,6 +182,17 @@ class SoccerRuntime:
                 debugdraw.point(r.pose.x, r.pose.y, rgb=(0.2, 0.4, 1.0),
                                 scale=0.3, ns="opponent")
                 self._draw_facing(r.pose)
+
+    def _draw_game_state(self, ctx: Context) -> None:
+        """绘制比赛状态:phase、state、set_type、secondary_time。"""
+        from . import debugdraw
+
+        g = ctx.game
+        debugdraw.text(
+            0.0, ctx.field.half_width + 0.2,
+            f"phase={g.phase.value} state={g.state.value} set={g.set_type.value} secondary={g.secondary_time:.1f}",
+            rgb=(1.0, 1.0, 0.0), ns="phase",
+        )
 
     def _draw_facing(self, pose) -> None:
         """机器人朝向:白色短箭头(0.4m),ns=facing。与黄色速度 heading 区分。"""
@@ -236,7 +248,7 @@ class SoccerRuntime:
         _log.info(
             "tick #%d dt=%.3f game=%s ball=%s teammates_seen=%d/%d opponents_seen=%d/%d",
             self._tick_id, dt,
-            "None" if ctx.game is None else ctx.game.state.value,
+            ctx.game.state.value,
             ball_repr,
             seen, len(ctx.teammates),
             opp_seen, len(ctx.opponents),
@@ -250,14 +262,18 @@ class SoccerRuntime:
         """构造当前帧的 Context 快照。
 
         从数据源获取原始快照，经过新鲜度过滤后构造只读 Context。
-        game 字段中的 phase 和 strategy_state 由 _fresh_game 注入。
+        prev_phase 保存上一帧的 phase，用于检测阶段变化。
         """
         snap = self._source.get_snapshot() if self._source is not None else WorldSnapshot()
+        
+        prev_phase = self._prev_context.game.phase if self._prev_context is not None else None
+        
         ctx = Context(
             now=now,
             dt=dt,
             team_id=self._config.team_id,
             field=ADULT_FIELD_DIMENSIONS,
+            prev_phase=prev_phase,
             game=self._fresh_game(snap.game, now),
             ball=self._fresh_ball(snap.ball, now),
             teammates={
@@ -266,26 +282,20 @@ class SoccerRuntime:
             opponents={
                 pid: self._fresh_robot(r, now) for pid, r in snap.opponents.items()
             },
-            pre_context=self._prev_context,
+            strategy=self._strategy,
         )
         self._prev_context = ctx
         return ctx
 
     def _fresh_game(
         self, game: GameControlState | None, now: float,
-    ) -> GameControlState | None:
-        """新鲜度检查并注入策略相关字段。
-
-        检查通过后，计算当前比赛阶段并注入策略跨帧状态容器。
-        """
-        if game is None:
-            return None
-        if now - game.last_seen_at > self._config.game_state_max_age_sec:
-            return None
+    ) -> GameControlState:
+        """新鲜度检查并注入 phase 字段。返回默认值如果数据无效。"""
+        if game is None or now - game.last_seen_at > self._config.game_state_max_age_sec:
+            return GameControlState()
         return dataclasses.replace(
             game,
             phase=game._compute_phase(self._config.team_id),
-            strategy_state=self._state,
         )
 
     def _fresh_ball(self, ball: BallState | None, now: float) -> BallState | None:

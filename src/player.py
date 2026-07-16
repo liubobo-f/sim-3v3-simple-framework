@@ -82,12 +82,35 @@ class Player(MotionMixin):
     @property
     def penalty(self) -> Penalty:
         ctx = self.context
-        state = ctx.game.get_player_state(self.config.team_id, self.id) if (ctx and ctx.game) else None
+        if ctx is None:
+            return Penalty.NONE
+        state = ctx.game.get_player_state(self.config.team_id, self.id)
         return state.penalty if state else Penalty.NONE
 
     @property
     def is_penalized(self) -> bool:
         return self.penalty != Penalty.NONE
+
+    def check_ready(self) -> bool:
+        """检查球员是否可以执行策略，并设置相应状态。
+
+        返回:
+            True 表示球员状态正常，可以执行策略
+            False 表示球员有问题（被罚、未就绪、无位姿），已设置对应 action
+        """
+        ready = self.ensure_ready()
+        if self.is_penalized:
+            self.action = Action.PENALIZED
+            self.stop()
+            return False
+        if not ready:
+            self.action = Action.FALLEN if self.is_fallen else Action.SWITCHING_MODE
+            return False
+        if self.pose is None:
+            self.action = Action.NO_POSE
+            self.stop()
+            return False
+        return True
 
     def attack(self, kick_target: tuple[float, float] | None = None, action = Action.ATTACK) -> None:
         """进攻动作:接近球并尝试射门。
